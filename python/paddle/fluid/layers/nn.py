@@ -6471,9 +6471,6 @@ def lod_append(x, level):
 def lrn(input, n=5, k=1.0, alpha=1e-4, beta=0.75, name=None,
         data_format='NCHW'):
     """
-    :alias_main: paddle.nn.functional.lrn
-	:alias: paddle.nn.functional.lrn,paddle.nn.functional.norm.lrn
-	:old_api: paddle.fluid.layers.lrn
 
     This operator implements the Local Response Normalization Layer.
     This layer performs a type of "lateral inhibition" by normalizing over local input regions.

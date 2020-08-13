@@ -16,6 +16,7 @@ from __future__ import print_function
 
 import unittest
 import numpy as np
+import paddle
 import paddle.fluid as fluid
 import paddle.fluid.core as core
 from op_test import OpTest
@@ -152,6 +153,203 @@ class TestLRNOpError(unittest.TestCase):
             # the input must be float32
             in_w = fluid.data(name="in_w", shape=[None, 3, 3, 3], dtype="int64")
             self.assertRaises(TypeError, fluid.layers.lrn, in_w)
+
+
+class TestLRNFAPI(unittest.TestCase):
+    def setUp(self):
+        np.random.seed(123)
+        self.places = [fluid.CPUPlace()]
+        if core.is_compiled_with_cuda():
+            self.places.append(fluid.CUDAPlace(0))
+
+    def check_static_result(self, place):
+        with fluid.program_guard(fluid.Program(), fluid.Program()):
+            data1 = fluid.data(
+                name='data1', shape=[2, 4, 5, 5], dtype='float32')
+            data2 = fluid.data(
+                name='data2', shape=[2, 5, 5, 4], dtype='float32')
+            out1 = paddle.nn.functional.local_response_norm(
+                data1, data_format='NCHW')
+            out2 = paddle.nn.functional.local_response_norm(
+                data2, data_format='NHWC')
+            data1_np = np.random.random((2, 4, 5, 5)).astype("float32")
+            data2_np = np.transpose(data1_np, [0, 2, 3, 1])
+
+            exe = fluid.Executor(place)
+            results = exe.run(fluid.default_main_program(),
+                              feed={"data1": data1_np,
+                                    "data2": data2_np},
+                              fetch_list=[out1, out2],
+                              return_numpy=True)
+
+            self.assertTrue(
+                np.allclose(results[0], np.transpose(results[1], (0, 3, 1, 2))))
+
+    def test_static(self):
+        for place in self.places:
+            self.check_static_result(place=place)
+
+    def test_dygraph(self):
+        for place in self.places:
+            with fluid.dygraph.guard(place):
+                data1_np = np.random.random((2, 4, 5, 5)).astype("float32")
+                data2_np = np.transpose(data1_np, [0, 2, 3, 1])
+                data1 = fluid.dygraph.to_variable(data1_np)
+                data2 = fluid.dygraph.to_variable(data2_np)
+                out1 = paddle.nn.functional.local_response_norm(
+                    data1, data_format='NCHW')
+                out2 = paddle.nn.functional.local_response_norm(
+                    data2, data_format='NHWC')
+
+                self.assertTrue(
+                    np.allclose(out1.numpy(),
+                                np.transpose(out2.numpy(), (0, 3, 1, 2))))
+
+
+class TestLRNFAPIError(unittest.TestCase):
+    def test_errors(self):
+        with program_guard(Program(), Program()):
+
+            def test_x():
+                # the input must be float32
+                in_w = fluid.data(
+                    name="in_w", shape=[None, 3, 3, 3], dtype="int64")
+                paddle.nn.functional.local_response_norm(in_w)
+
+            self.assertRaises(TypeError, test_x)
+
+            def test_xdim():
+                # the dimensions of input must be 4
+                in_w = fluid.data(name="in_w", shape=[2, 3, 4], dtype="float32")
+                paddle.nn.functional.local_response_norm(in_w)
+
+            self.assertRaises(ValueError, test_xdim)
+
+            def test_dataformat():
+                # data_format should be 'NCHW' or 'NHWC'
+                x = fluid.data(name='x2', shape=[2, 3, 4, 5], dtype="float32")
+                paddle.nn.functional.dropout2d(x, data_format='CNHW')
+
+            self.assertRaises(ValueError, test_dataformat)
+
+
+def lrn_np(x, alpha, beta, k):
+    N, C, H, W = x.shape
+    start = -(N - 1) // 2
+    end = start + N
+
+    mid = np.empty((N, C, H, W)).astype("float32")
+    mid.fill(k)
+    for m in range(0, N):
+        for i in range(0, C):
+            for c in range(start, end):
+                ch = i + c
+                if ch < 0 or ch >= C:
+                    continue
+
+                s = mid[m][i][:][:]
+                r = x[m][ch][:][:]
+                s += np.square(r) * alpha
+
+    mid2 = np.power(mid, -beta)
+    res = np.multiply(x, mid2)
+    return res
+
+
+class TestLRNFAPI(unittest.TestCase):
+    def setUp(self):
+        np.random.seed(123)
+        self.places = [fluid.CPUPlace()]
+        if core.is_compiled_with_cuda():
+            self.places.append(fluid.CUDAPlace(0))
+
+    def check_static_result(self, place):
+        with fluid.program_guard(fluid.Program(), fluid.Program()):
+            data1 = fluid.data(
+                name='data1', shape=[2, 4, 5, 5], dtype='float32')
+            data2 = fluid.data(
+                name='data2', shape=[2, 5, 5, 4], dtype='float32')
+            out1 = paddle.nn.functional.local_response_norm(
+                data1, data_format='NCHW')
+            out2 = paddle.nn.functional.local_response_norm(
+                data2, data_format='NHWC')
+            data1_np = np.random.random((2, 4, 5, 5)).astype("float32")
+            data2_np = np.transpose(data1_np, [0, 2, 3, 1])
+
+            exe = fluid.Executor(place)
+            results = exe.run(fluid.default_main_program(),
+                              feed={"data1": data1_np,
+                                    "data2": data2_np},
+                              fetch_list=[out1, out2],
+                              return_numpy=True)
+
+            self.assertTrue(
+                np.allclose(results[0], np.transpose(results[1], (0, 3, 1, 2))))
+
+    def test_static(self):
+        for place in self.places:
+            self.check_static_result(place=place)
+
+    def test_dygraph(self):
+        for place in self.places:
+            with fluid.dygraph.guard(place):
+                data1_np = np.random.random((2, 4, 5, 5)).astype("float32")
+                data2_np = np.transpose(data1_np, [0, 2, 3, 1])
+                data1 = fluid.dygraph.to_variable(data1_np)
+                data2 = fluid.dygraph.to_variable(data2_np)
+                out1 = paddle.nn.functional.local_response_norm(
+                    data1, data_format='NCHW')
+                out2 = paddle.nn.functional.local_response_norm(
+                    data2, data_format='NHWC')
+
+                self.assertTrue(
+                    np.allclose(out1.numpy(),
+                                np.transpose(out2.numpy(), (0, 3, 1, 2))))
+
+
+class TestLRNFAPIError(unittest.TestCase):
+    def test_errors(self):
+        with program_guard(Program(), Program()):
+
+            def test_x():
+                # the input must be float32
+                in_w = fluid.data(
+                    name="in_w", shape=[None, 3, 3, 3], dtype="int64")
+                paddle.nn.functional.local_response_norm(in_w)
+
+            self.assertRaises(TypeError, test_x)
+
+            def test_xdim():
+                # the dimensions of input must be 4
+                in_w = fluid.data(name="in_w", shape=[2, 3, 4], dtype="float32")
+                paddle.nn.functional.local_response_norm(in_w)
+
+            self.assertRaises(ValueError, test_xdim)
+
+            def test_dataformat():
+                # data_format should be 'NCHW' or 'NHWC'
+                x = fluid.data(name='x2', shape=[2, 3, 4, 5], dtype="float32")
+                paddle.nn.functional.dropout2d(x, data_format='CNHW')
+
+            self.assertRaises(ValueError, test_dataformat)
+
+
+class TestLRNCAPI(unittest.TestCase):
+    def setUp(self):
+        np.random.seed(123)
+        self.places = [fluid.CPUPlace()]
+        if core.is_compiled_with_cuda():
+            self.places.append(fluid.CUDAPlace(0))
+
+    def test_dygraph(self):
+        for place in self.places:
+            with fluid.dygraph.guard(place):
+                input_np = np.random.random([4, 4]).astype("float32")
+                result_np = lrn_np(input_np, alpha=1e-4, beta=0.75, k=1.0)
+                input = fluid.dygraph.to_variable(input_np)
+                m = paddle.nn.LocalResponseNorm()
+                result = m(input)
+                self.assertTrue(np.allclose(result.numpy(), result_np))
 
 
 if __name__ == "__main__":
